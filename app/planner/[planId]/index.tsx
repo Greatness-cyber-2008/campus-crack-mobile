@@ -54,7 +54,7 @@ export default function PlanDetailScreen() {
     const parts = [`Explain this week's topic in more depth: ${week.topic}.`];
     if (week.description) parts.push(week.description);
     if (week.study_tip) parts.push(`Study tip to build on: ${week.study_tip}`);
-    router.push({ pathname: '/(tabs)/tutor' as any, params: { autoAsk: parts.join(' ') } });
+    router.push({ pathname: '/(tabs)/aiTutor' as any, params: { autoAsk: parts.join(' ') } });
   }
 
   return (

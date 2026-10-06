@@ -4,23 +4,42 @@ import { useUser } from '@/hooks/useUser';
 import { getAuthHeader } from '@/lib/getAuthHeader';
 import { supabase } from '@/lib/supabase';
 import * as DocumentPicker from 'expo-document-picker';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 const DISCIPLINES = ['general', 'computing', 'medical', 'commercial', 'science', 'arts', 'law', 'engineering'];
 
+interface CourseOption { id: string; title: string; course_code: string | null; }
+
 export default function UploadScreen() {
   const { user } = useUser();
   const router = useRouter();
+  const { courseId: preselectedCourseId } = useLocalSearchParams<{ courseId?: string }>();
 
   const [file, setFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [title, setTitle] = useState('');
   const [courseCode, setCourseCode] = useState('');
   const [discipline, setDiscipline] = useState('general');
+  const [courses, setCourses] = useState<CourseOption[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<string>(preselectedCourseId || '');
   const [status, setStatus] = useState<'idle' | 'picking' | 'uploading' | 'extracting' | 'done' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [materialId, setMaterialId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data } = await supabase
+        .from('courses')
+        .select('id, title, course_code')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      setCourses(data || []);
+    })();
+  }, [user]);
+
+  const preselectedCourse = courses.find((c) => c.id === preselectedCourseId);
 
   async function pickFile() {
     const result = await DocumentPicker.getDocumentAsync({
@@ -53,6 +72,7 @@ export default function UploadScreen() {
         .from('materials')
         .insert({
           user_id: user.id,
+          course_id: selectedCourseId || null,
           title: title || file.name,
           course_code: courseCode || null,
           discipline,
@@ -82,6 +102,7 @@ export default function UploadScreen() {
   }
 
   if (status === 'done') {
+    const backCourseId = selectedCourseId || preselectedCourseId;
     return (
       <View style={styles.centered}>
         <Text style={styles.doneTitle}>Material ready ✅</Text>
@@ -90,9 +111,21 @@ export default function UploadScreen() {
         <Pressable style={styles.primaryButton} onPress={() => router.push({ pathname: '/generate', params: { materialId } })}>
           <Text style={styles.primaryButtonText}>Set up practice questions →</Text>
         </Pressable>
-        <Pressable style={styles.secondaryButton} onPress={() => router.push('/(tabs)/home')}>
-          <Text style={styles.secondaryButtonText}>Back to home</Text>
+        <Pressable
+          style={styles.outlineButton}
+          onPress={() => router.push({ pathname: '/planner/generate', params: { materialId } })}
+        >
+          <Text style={styles.outlineButtonText}>📅 Build a study plan</Text>
         </Pressable>
+        {backCourseId ? (
+          <Pressable style={styles.secondaryButton} onPress={() => router.push({ pathname: '/courses/[courseId]' as any, params: { courseId: backCourseId } })}>
+            <Text style={styles.secondaryButtonText}>← Back to course</Text>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.secondaryButton} onPress={() => router.push('/(tabs)/home')}>
+            <Text style={styles.secondaryButtonText}>Back to home</Text>
+          </Pressable>
+        )}
       </View>
     );
   }
@@ -107,6 +140,37 @@ export default function UploadScreen() {
           {file ? file.name : 'Tap to choose a file (PDF or .txt)'}
         </Text>
       </Pressable>
+
+      {preselectedCourse ? (
+        <View style={styles.courseNotice}>
+          <Text style={styles.courseNoticeText}>
+            Uploading to course: <Text style={{ color: colors.gold, fontWeight: '700' }}>{preselectedCourse.title}</Text>
+          </Text>
+        </View>
+      ) : (
+        <>
+          <Text style={styles.label}>Add to a course (optional)</Text>
+          <View style={styles.chipRow}>
+            <Pressable
+              style={[styles.disciplineChip, !selectedCourseId && styles.disciplineChipActive]}
+              onPress={() => setSelectedCourseId('')}
+            >
+              <Text style={[styles.disciplineChipText, !selectedCourseId && styles.disciplineChipTextActive]}>No course</Text>
+            </Pressable>
+            {courses.map((c) => (
+              <Pressable
+                key={c.id}
+                style={[styles.disciplineChip, selectedCourseId === c.id && styles.disciplineChipActive]}
+                onPress={() => setSelectedCourseId(c.id)}
+              >
+                <Text style={[styles.disciplineChipText, selectedCourseId === c.id && styles.disciplineChipTextActive]} numberOfLines={1}>
+                  {c.title}{c.course_code ? ` (${c.course_code})` : ''}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </>
+      )}
 
       <Text style={styles.label}>Title</Text>
       <TextInput
@@ -178,6 +242,9 @@ const styles = StyleSheet.create({
     marginBottom: 18, fontSize: 15,
   },
   disciplineRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 22 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 },
+  courseNotice: { backgroundColor: 'rgba(232,184,74,0.08)', borderWidth: 1, borderColor: 'rgba(232,184,74,0.25)', borderRadius: 12, padding: 12, marginBottom: 18 },
+  courseNoticeText: { color: colors.paper, fontSize: 12.5 },
   disciplineChip: {
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
@@ -188,6 +255,8 @@ const styles = StyleSheet.create({
   error: { color: colors.stamp, fontSize: 13, marginBottom: 14 },
   primaryButton: { backgroundColor: colors.gold, paddingVertical: 15, borderRadius: 999, alignItems: 'center', marginBottom: 12 },
   primaryButtonText: { color: colors.ink, fontWeight: '700', fontSize: 15 },
+  outlineButton: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingVertical: 14, borderRadius: 999, alignItems: 'center', marginBottom: 12, paddingHorizontal: 20 },
+  outlineButtonText: { color: colors.paper, fontWeight: '600', fontSize: 14 },
   secondaryButton: { paddingVertical: 10, alignItems: 'center' },
   secondaryButtonText: { color: colors.slate, fontSize: 13 },
   doneTitle: { color: colors.paper, fontSize: 20, fontWeight: '800', marginBottom: 6 },

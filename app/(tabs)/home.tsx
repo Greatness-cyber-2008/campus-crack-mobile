@@ -113,7 +113,7 @@ export default function HomeScreen() {
       <View style={styles.quickActions}>
         <QuickAction icon="cloud-upload" label="Upload Notes" onPress={() => router.push('/upload')} />
         <QuickAction icon="document-text" label="Practice" onPress={() => router.push('/library')} />
-        <QuickAction icon="albums" label="Flashcards" onPress={() => router.push('/library')} />
+        <QuickAction icon="school" label="My Courses" onPress={() => router.push('/courses')} />
         <QuickAction icon="calendar" label="Planner" onPress={() => router.push('/planner')} />
       </View>
 
