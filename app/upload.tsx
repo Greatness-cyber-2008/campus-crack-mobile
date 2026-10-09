@@ -113,6 +113,12 @@ export default function UploadScreen() {
         </Pressable>
         <Pressable
           style={styles.outlineButton}
+          onPress={() => router.push({ pathname: '/flashcards/generate', params: { materialId } })}
+        >
+          <Text style={styles.outlineButtonText}>🗂️ Generate flashcards</Text>
+        </Pressable>
+        <Pressable
+          style={styles.outlineButton}
           onPress={() => router.push({ pathname: '/planner/generate', params: { materialId } })}
         >
           <Text style={styles.outlineButtonText}>📅 Build a study plan</Text>

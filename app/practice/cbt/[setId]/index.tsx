@@ -22,9 +22,11 @@ export default function CbtPracticeScreen() {
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittedRef = useRef(false);
+  const initializedRef = useRef(false);
 
   useEffect(() => {
-    if (!user || !setId) return;
+    if (!user || !setId || initializedRef.current) return;
+    initializedRef.current = true;
     (async () => {
       const { data: qsetData } = await supabase
         .from('question_sets')
@@ -47,7 +49,7 @@ export default function CbtPracticeScreen() {
       setAttemptId(attempt?.id || null);
       if (qsetData?.time_limit_minutes) setSecondsLeft(qsetData.time_limit_minutes * 60);
     })();
-  }, [user, setId]);
+  }, [user?.id, setId]);
 
   useEffect(() => {
     if (secondsLeft === null) return;
