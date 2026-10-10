@@ -6,7 +6,17 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 interface AttemptDetail { id: string; score: number; marks_scored: number; total_marks: number; question_set_id: string; }
-interface AnswerRow { id: string; question_id: string; selected_option: string | null; is_correct: boolean | null; self_rating: string | null; written_response: string | null; }
+interface AnswerRow {
+  id: string;
+  question_id: string;
+  selected_option: string | null;
+  is_correct: boolean | null;
+  written_response: string | null;
+  marks_awarded: number | null;
+  ai_feedback: string | null;
+  points_covered: string[] | null;
+  points_missed: string[] | null;
+}
 interface QuestionRow { id: string; prompt: string; options: { key: string; text: string }[] | null; correct_option: string | null; explanation: string | null; }
 
 function verdict(score: number) {
@@ -44,7 +54,7 @@ export default function ResultsScreen() {
 
       const { data: answerData } = await supabase
         .from('answers')
-        .select('id, question_id, selected_option, is_correct, self_rating, written_response')
+        .select('id, question_id, selected_option, is_correct, written_response, marks_awarded, ai_feedback, points_covered, points_missed')
         .eq('attempt_id', attemptId);
 
       const { data: questionData } = await supabase
@@ -81,6 +91,13 @@ export default function ResultsScreen() {
       </View>
       <Text style={styles.scoreSub}>You scored {attempt.marks_scored} / {attempt.total_marks} marks</Text>
 
+      {examMode === 'written' && (
+        <Text style={styles.disclaimer}>
+          This is an estimate of how you'd likely perform if you wrote these exact answers in the real
+          exam. Your actual lecturer's grading may differ.
+        </Text>
+      )}
+
       {answers.map((a, i) => {
         const q = questions[a.question_id];
         if (!q) return null;
@@ -114,9 +131,29 @@ export default function ResultsScreen() {
               <>
                 <Text style={styles.answerLabel}>Your response:</Text>
                 <Text style={styles.explanation}>{a.written_response || '(no response)'}</Text>
-                <Text style={styles.answerLabel}>
-                  Self-rating: <Text style={{ color: colors.gold, textTransform: 'capitalize' }}>{a.self_rating?.replace('_', ' ')}</Text>
+
+                <Text style={[styles.answerLabel, { marginTop: 10 }]}>
+                  Score:{' '}
+                  <Text style={{ color: colors.gold }}>{Math.round((a.marks_awarded || 0) * 100)}%</Text>
                 </Text>
+                {a.ai_feedback && <Text style={styles.explanation}>{a.ai_feedback}</Text>}
+
+                {!!a.points_covered?.length && (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={styles.pointsLabel}>Covered</Text>
+                    {a.points_covered.map((point, pi) => (
+                      <Text key={pi} style={styles.pointCovered}>✓ {point}</Text>
+                    ))}
+                  </View>
+                )}
+                {!!a.points_missed?.length && (
+                  <View style={{ marginTop: 8 }}>
+                    <Text style={styles.pointsLabel}>Missed</Text>
+                    {a.points_missed.map((point, pi) => (
+                      <Text key={pi} style={styles.pointMissed}>✗ {point}</Text>
+                    ))}
+                  </View>
+                )}
               </>
             )}
           </View>
@@ -146,7 +183,8 @@ const styles = StyleSheet.create({
   },
   stampScore: { fontSize: 30, fontWeight: '900' },
   stampLabel: { fontSize: 10, letterSpacing: 2, marginTop: 4 },
-  scoreSub: { color: colors.slate, fontSize: 13, textAlign: 'center', marginBottom: 28 },
+  scoreSub: { color: colors.slate, fontSize: 13, textAlign: 'center', marginBottom: 12 },
+  disclaimer: { color: colors.slate, fontSize: 11.5, textAlign: 'center', lineHeight: 16, marginBottom: 24, paddingHorizontal: 12 },
   questionCard: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 14, padding: 16, marginBottom: 12 },
   questionCardCorrect: { borderColor: 'rgba(232,184,74,0.3)', backgroundColor: 'rgba(232,184,74,0.04)' },
   questionCardWrong: { borderColor: 'rgba(194,59,34,0.35)', backgroundColor: 'rgba(194,59,34,0.05)' },
@@ -154,6 +192,9 @@ const styles = StyleSheet.create({
   questionPrompt: { color: colors.paper, fontSize: 14.5, lineHeight: 21, marginBottom: 10 },
   answerLabel: { color: colors.paper, fontSize: 13, marginBottom: 4 },
   explanation: { color: colors.slate, fontSize: 12.5, lineHeight: 18, marginTop: 4 },
+  pointsLabel: { color: colors.slate, fontSize: 11, fontWeight: '700', letterSpacing: 0.5, marginBottom: 4 },
+  pointCovered: { color: colors.gold, fontSize: 12.5, lineHeight: 18 },
+  pointMissed: { color: colors.stamp, fontSize: 12.5, lineHeight: 18 },
   actionsRow: { flexDirection: 'row', gap: 10, marginTop: 10, marginBottom: 20 },
   secondaryButton: { flex: 1, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingVertical: 13, borderRadius: 999, alignItems: 'center' },
   secondaryButtonText: { color: colors.paper, fontSize: 13 },

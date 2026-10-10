@@ -1,14 +1,14 @@
+import { API_BASE_URL } from '@/constants/api';
 import { colors } from '@/constants/theme';
 import { useUser } from '@/hooks/useUser';
+import { getAuthHeader } from '@/lib/getAuthHeader';
 import { supabase } from '@/lib/supabase';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-interface Question { id: string; order_index: number; prompt: string; model_answer: string; marking_points: string[]; }
+interface Question { id: string; order_index: number; prompt: string; }
 interface QSet { id: string; title: string; }
-
-const RATING_MARKS: Record<string, number> = { nailed_it: 1, close: 0.5, missed: 0 };
 
 export default function WrittenPracticeScreen() {
   const { setId } = useLocalSearchParams<{ setId: string }>();
@@ -19,18 +19,19 @@ export default function WrittenPracticeScreen() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [current, setCurrent] = useState(0);
   const [responses, setResponses] = useState<Record<string, string>>({});
-  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
-  const [ratings, setRatings] = useState<Record<string, string>>({});
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const initializedRef = useRef(false);
 
   useEffect(() => {
-    if (!user || !setId) return;
+    if (!user || !setId || initializedRef.current) return;
+    initializedRef.current = true;
     (async () => {
       const { data: qsetData } = await supabase.from('question_sets').select('id, title').eq('id', setId).single();
       const { data: questionsData } = await supabase
         .from('questions')
-        .select('id, order_index, prompt, model_answer, marking_points')
+        .select('id, order_index, prompt')
         .eq('question_set_id', setId)
         .order('order_index');
       const { data: attempt } = await supabase
@@ -43,29 +44,37 @@ export default function WrittenPracticeScreen() {
       setQuestions(questionsData || []);
       setAttemptId(attempt?.id || null);
     })();
-  }, [user, setId]);
+  }, [user?.id, setId]);
 
   async function handleSubmit() {
-    if (!attemptId) return;
+    if (!attemptId || submitting) return;
     setSubmitting(true);
+    setError(null);
 
-    let marksScored = 0;
-    const totalMarks = questions.length;
-    const answerRows = questions.map((q) => {
-      const rating = ratings[q.id] || 'missed';
-      const marks = RATING_MARKS[rating] ?? 0;
-      marksScored += marks;
-      return { attempt_id: attemptId, question_id: q.id, written_response: responses[q.id] || '', self_rating: rating, marks_awarded: marks };
-    });
+    try {
+      const authHeader = await getAuthHeader();
+      const res = await fetch(`${API_BASE_URL}/api/grade-written`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader },
+        body: JSON.stringify({
+          attemptId,
+          answers: questions.map((q) => ({ questionId: q.id, response: responses[q.id] || '' })),
+        }),
+      });
 
-    await supabase.from('answers').insert(answerRows);
-    const score = totalMarks > 0 ? Math.round((marksScored / totalMarks) * 100) : 0;
+      const data = await res.json();
 
-    await supabase.from('attempts').update({
-      submitted_at: new Date().toISOString(), status: 'submitted', score, total_marks: totalMarks, marks_scored: marksScored,
-    }).eq('id', attemptId);
+      if (!res.ok) {
+        setError(data.error || 'Could not grade this attempt, please try again');
+        setSubmitting(false);
+        return;
+      }
 
-    router.replace({ pathname: '/results/[attemptId]' as any, params: { attemptId } });
+      router.replace({ pathname: '/results/[attemptId]' as any, params: { attemptId } });
+    } catch {
+      setError('Network error — please try again');
+      setSubmitting(false);
+    }
   }
 
   if (!qset || questions.length === 0) {
@@ -77,8 +86,6 @@ export default function WrittenPracticeScreen() {
   }
 
   const q = questions[current];
-  const isRevealed = revealed[q.id];
-  const allRated = questions.every((qq) => ratings[qq.id]);
 
   return (
     <View style={styles.container}>
@@ -94,39 +101,13 @@ export default function WrittenPracticeScreen() {
           style={styles.answerInput}
           value={responses[q.id] || ''}
           onChangeText={(t) => setResponses((prev) => ({ ...prev, [q.id]: t }))}
-          editable={!isRevealed}
           multiline
           numberOfLines={7}
           placeholder="Write your answer as you would in the exam…"
           placeholderTextColor={colors.slate}
         />
 
-        {!isRevealed ? (
-          <Pressable style={styles.revealButton} onPress={() => setRevealed((prev) => ({ ...prev, [q.id]: true }))}>
-            <Text style={styles.revealButtonText}>Reveal model answer & marking points</Text>
-          </Pressable>
-        ) : (
-          <View style={styles.revealCard}>
-            <Text style={styles.revealLabel}>MODEL ANSWER</Text>
-            <Text style={styles.revealText}>{q.model_answer}</Text>
-            <Text style={[styles.revealLabel, { marginTop: 14 }]}>MARKING POINTS</Text>
-            {(q.marking_points || []).map((point, i) => (
-              <Text key={i} style={styles.markingPoint}>• {point}</Text>
-            ))}
-            <Text style={styles.rateLabel}>Be honest — how did you do?</Text>
-            <View style={styles.rateRow}>
-              {[{ key: 'nailed_it', label: 'Nailed it' }, { key: 'close', label: 'Close' }, { key: 'missed', label: 'Missed it' }].map((opt) => (
-                <Pressable
-                  key={opt.key}
-                  style={[styles.rateChip, ratings[q.id] === opt.key && styles.rateChipActive]}
-                  onPress={() => setRatings((prev) => ({ ...prev, [q.id]: opt.key }))}
-                >
-                  <Text style={[styles.rateChipText, ratings[q.id] === opt.key && styles.rateChipTextActive]}>{opt.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
+        {error && <Text style={styles.error}>{error}</Text>}
       </ScrollView>
 
       <View style={styles.footer}>
@@ -138,8 +119,8 @@ export default function WrittenPracticeScreen() {
             <Text style={styles.nextButtonText}>Next →</Text>
           </Pressable>
         ) : (
-          <Pressable style={[styles.submitButton, !allRated && { opacity: 0.5 }]} onPress={handleSubmit} disabled={submitting || !allRated}>
-            <Text style={styles.submitButtonText}>{submitting ? 'Submitting…' : 'Finish & see results'}</Text>
+          <Pressable style={[styles.submitButton, submitting && { opacity: 0.6 }]} onPress={handleSubmit} disabled={submitting}>
+            <Text style={styles.submitButtonText}>{submitting ? 'Grading your answers…' : 'Finish & see results'}</Text>
           </Pressable>
         )}
       </View>
@@ -156,18 +137,7 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   prompt: { color: colors.paper, fontSize: 16, lineHeight: 23, marginBottom: 16 },
   answerInput: { backgroundColor: colors.inkLight, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 14, color: colors.paper, minHeight: 140, textAlignVertical: 'top', marginBottom: 14, fontSize: 14 },
-  revealButton: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: colors.inkLight, paddingVertical: 13, borderRadius: 999, alignItems: 'center' },
-  revealButtonText: { color: colors.paper, fontSize: 13 },
-  revealCard: { borderWidth: 1, borderColor: 'rgba(232,184,74,0.25)', backgroundColor: 'rgba(232,184,74,0.05)', borderRadius: 14, padding: 16 },
-  revealLabel: { color: colors.gold, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
-  revealText: { color: colors.paper, fontSize: 13.5, lineHeight: 20 },
-  markingPoint: { color: colors.slate, fontSize: 13, lineHeight: 20 },
-  rateLabel: { color: colors.slate, fontSize: 12, marginTop: 16, marginBottom: 8 },
-  rateRow: { flexDirection: 'row', gap: 8 },
-  rateChip: { flex: 1, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 999, paddingVertical: 10, alignItems: 'center' },
-  rateChipActive: { borderColor: colors.gold, backgroundColor: 'rgba(232,184,74,0.15)' },
-  rateChipText: { color: colors.slate, fontSize: 12 },
-  rateChipTextActive: { color: colors.gold },
+  error: { color: colors.stamp, fontSize: 13, textAlign: 'center' },
   footer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
   navText: { color: colors.slate, fontSize: 14 },
   nextButton: { backgroundColor: colors.inkLight, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 22, paddingVertical: 12, borderRadius: 999 },
